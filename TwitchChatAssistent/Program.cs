@@ -168,7 +168,7 @@ class TwitchChatAssistant
 					excludedUsers.Add(trimmedLine);
 				}
 			}
-			Console.WriteLine($"Loaded {excludedUsers.Count - 1} excluded users from {filePath}.\n");
+			Console.WriteLine($"Loaded {excludedUsers.Count} excluded users from {filePath}.\n");
 		}
 		catch (Exception ex)
 		{
