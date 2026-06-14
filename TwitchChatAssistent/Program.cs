@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using TwitchLib.Client;
 using TwitchLib.Client.Events;
@@ -10,206 +12,292 @@ using TwitchLib.Communication.Clients;
 using TwitchLib.Communication.Events;
 using TwitchLib.Communication.Models;
 
-class TwitchChatAssistant
+public struct UserData
+{
+	public string LowercaseName { get; set; }
+	public string ProperCaseName { get; set; }
+	public string Color { get; set; }
+}
+
+public class TwitchChatAssistant
 {
 	private TwitchClient client;
-	private HashSet<string> uniqueUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-	private HashSet<string> bannedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-	private HashSet<string> excludedUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+	private Dictionary<string, UserData> uniqueUsers = new();
+	private HashSet<string> excludedUsers = new();
 	private string channelName;
+	private string oauthToken;
+	private string botUsername;
 	private bool isRunning = true;
+	private bool isReconnecting = false;
 
-	static async Task Main(string[] args)
+	public static void Main(string[] args)
 	{
-		var assistant = new TwitchChatAssistant();
-		await assistant.StartAsync();
+		var app = new TwitchChatAssistant();
+		app.Run();
 	}
 
-	async Task StartAsync()
+	private void Run()
 	{
-		Console.WriteLine("=== Twitch Chat Assistant ===\n");
-
-		// Load config
-		var config = Config.Load();
-		channelName = config.ChannelName;
-		string oauthToken = config.OAuthToken;
-		string botUsername = config.BotUsername;
-
-		// Load excluded users from file
-		LoadExcludedUsers();
-
-		// Add streamer's name to excluded users
-		excludedUsers.Add(channelName);
-
-		// Initialize the Twitch client
-		var credentials = new ConnectionCredentials(botUsername, oauthToken);
-		var clientOptions = new ClientOptions
+		// Load configuration
+		if (!LoadConfig())
 		{
-			MessagesAllowedInPeriod = 750,
-			ThrottlingPeriod = TimeSpan.FromSeconds(30)
-		};
-
-		var customClient = new WebSocketClient(clientOptions);
-		client = new TwitchClient(customClient);
-
-		// Hook up events
-		client.OnConnected += OnConnected;
-		client.OnDisconnected += OnDisconnected;
-		client.OnMessageReceived += OnMessageReceived;
-		client.OnConnectionError += OnConnectionError;
-		client.OnUserBanned += OnUserBanned;
-
-		// Initialize with credentials
-		client.Initialize(credentials, channelName);
-
-		// Connect to Twitch
-		client.Connect();
-
-		Console.WriteLine($"\n Connected to {channelName}'s chat. Press Enter to stop...\n");
-		Console.ReadLine();
-
-		// Stop the application
-		isRunning = false;
-
-		// Unhook events before disconnecting
-		client.OnConnected -= OnConnected;
-		client.OnDisconnected -= OnDisconnected;
-		client.OnMessageReceived -= OnMessageReceived;
-		client.OnConnectionError -= OnConnectionError;
-		client.OnUserBanned -= OnUserBanned;
-
-		// Disconnect and show results
-		client.Disconnect();
-		DisplayChatUsers();
-	}
-
-	private void OnConnected(object sender, OnConnectedArgs e)
-	{
-		Console.WriteLine($"Successfully connected to Twitch!");
-	}
-
-	private void OnDisconnected(object sender, OnDisconnectedEventArgs e)
-	{
-		Console.WriteLine("\nDisconnected from Twitch.");
-	}
-
-	private void OnMessageReceived(object sender, OnMessageReceivedArgs e)
-	{
-		string username = e.ChatMessage.Username;
-
-		// Don't add excluded or banned users
-		if (excludedUsers.Contains(username) || bannedUsers.Contains(username))
-		{
+			Console.WriteLine("Configuration failed. Please fix config.json and try again.");
 			return;
 		}
 
-		// Only stores unique usernames
-		if (uniqueUsers.Add(username))
+		// Load excluded users
+		LoadExcludedUsers();
+
+		// Initialize Twitch client
+		InitializeClient();
+
+		// Input loop - press Enter to save/display, or Ctrl+C to exit
+		Console.WriteLine("\n[READY] Press Enter to save & display list, or Ctrl+C to exit.\n");
+
+		while (isRunning)
 		{
-			Console.WriteLine($"{username} joined the chat");
+			try
+			{
+				string input = Console.ReadLine();
+				if (input != null) // Enter was pressed
+				{
+					DisplayAndSaveUsers();
+				}
+			}
+			catch
+			{
+				// Ctrl+C will break this naturally
+				break;
+			}
 		}
 	}
 
-	private void OnUserBanned(object sender, OnUserBannedArgs e)
+	private bool LoadConfig()
 	{
-		string bannedUsername = e.UserBan.Username;
-		bannedUsers.Add(bannedUsername);
-
-		// Remove from unique users if already added
-		uniqueUsers.Remove(bannedUsername);
-
-		Console.WriteLine($"{bannedUsername} was banned and removed from the list.");
-	}
-
-	private async void OnConnectionError(object sender, OnConnectionErrorArgs e)
-	{
-		Console.WriteLine($"Connection error: {e.Error.Message}");
-		Console.WriteLine("Attempting to reconnect in 5 seconds...\n");
-
-		// Retry connection after 5 seconds
-		while (isRunning)
+		try
 		{
-			await Task.Delay(5000); // Wait 5 seconds
+			var config = Config.Load();
 
-			try
+			if (string.IsNullOrEmpty(config.ChannelName) || string.IsNullOrEmpty(config.OAuthToken) || string.IsNullOrEmpty(config.BotUsername))
 			{
-				if (!client.IsConnected)
-				{
-					client.Connect();
-					Console.WriteLine("Reconnection attempt made.\n");
-				}
-				break;
+				Console.ForegroundColor = ConsoleColor.Yellow;
+				Console.WriteLine("⚠ Config values are empty. Please fill in config.json");
+				Console.ResetColor();
+				return false;
 			}
-			catch (Exception ex)
-			{
-				Console.WriteLine($"Reconnection failed: {ex.Message}. Retrying in 5 seconds...\n");
-			}
+
+			channelName = config.ChannelName;
+			oauthToken = config.OAuthToken;
+			botUsername = config.BotUsername;
+
+			Console.ForegroundColor = ConsoleColor.Green;
+			Console.WriteLine("✓ Config loaded successfully");
+			Console.ResetColor();
+			return true;
+		}
+		catch (Exception ex)
+		{
+			Console.ForegroundColor = ConsoleColor.Red;
+			Console.WriteLine($"✗ Error loading config: {ex.Message}");
+			Console.ResetColor();
+			return false;
 		}
 	}
 
 	private void LoadExcludedUsers()
 	{
-		string filePath = "excludedUsers.txt";
+		const string excludedPath = "excludedUsers.txt";
 
-		if (!File.Exists(filePath))
+		if (File.Exists(excludedPath))
 		{
-			Console.WriteLine($"Warning: {filePath} not found. Only streamer will be excluded.\n");
+			try
+			{
+				var lines = File.ReadAllLines(excludedPath);
+				excludedUsers = new HashSet<string>(lines.Select(l => l.Trim().ToLower()).Where(l => !string.IsNullOrEmpty(l)));
+				Console.ForegroundColor = ConsoleColor.Green;
+				Console.WriteLine($"✓ Loaded {excludedUsers.Count} excluded users");
+				Console.ResetColor();
+			}
+			catch (Exception ex)
+			{
+				Console.ForegroundColor = ConsoleColor.Red;
+				Console.WriteLine($"✗ Error loading excluded users: {ex.Message}");
+				Console.ResetColor();
+			}
+		}
+		else
+		{
+			Console.ForegroundColor = ConsoleColor.Yellow;
+			Console.WriteLine("⚠ excludedUsers.txt not found. Creating empty file...");
+			Console.ResetColor();
+			File.WriteAllText(excludedPath, "");
+		}
+	}
+
+	private void InitializeClient()
+	{
+		try
+		{
+			var credentials = new ConnectionCredentials(botUsername, oauthToken);
+			var clientOptions = new ClientOptions
+			{
+				MessagesAllowedInPeriod = 750,
+				ThrottlingPeriod = TimeSpan.FromSeconds(30)
+			};
+
+			WebSocketClient customClient = new(clientOptions);
+			client = new TwitchClient(customClient);
+			client.Initialize(credentials, channelName);
+
+			client.OnLog += Client_OnLog;
+			client.OnJoinedChannel += Client_OnJoinedChannel;
+			client.OnMessageReceived += Client_OnMessageReceived;
+			client.OnUserBanned += Client_OnUserBanned;
+			client.OnConnectionError += Client_OnConnectionError;
+			client.OnDisconnected += Client_OnDisconnected;
+			client.OnReconnected += Client_OnReconnected;
+
+			client.Connect();
+
+			Console.ForegroundColor = ConsoleColor.Green;
+			Console.WriteLine("✓ Twitch client initialized");
+			Console.ResetColor();
+		}
+		catch (Exception ex)
+		{
+			Console.ForegroundColor = ConsoleColor.Red;
+			Console.WriteLine($"✗ Error initializing client: {ex.Message}");
+			Console.ResetColor();
+		}
+	}
+
+	private void Client_OnLog(object sender, OnLogArgs e)
+	{
+		// Suppress verbose logs if needed
+	}
+
+	private void Client_OnJoinedChannel(object sender, OnJoinedChannelArgs e)
+	{
+		Console.ForegroundColor = ConsoleColor.Cyan;
+		Console.WriteLine($"✓ Connected to #{e.Channel}. Tracking chatters...");
+		Console.ResetColor();
+		Console.Out.Flush();
+	}
+
+	private void Client_OnMessageReceived(object sender, OnMessageReceivedArgs e)
+	{
+		string username = e.ChatMessage.Username.ToLower(); 
+
+		// Skip excluded users and channel owner
+		if (excludedUsers.Contains(username) || username == channelName.ToLower())
+			return;
+		
+		// Add or update user
+		if (!uniqueUsers.ContainsKey(username))
+		{
+			// Get color from HexColor property if available, otherwise construct from RGB
+			string hexColor = "#000000";
+
+			if (!string.IsNullOrEmpty(e.ChatMessage.ColorHex))
+			{
+				hexColor = e.ChatMessage.ColorHex;
+			}
+			else if (e.ChatMessage.Color != null)
+			{
+				hexColor = $"#{e.ChatMessage.Color.R:X2}{e.ChatMessage.Color.G:X2}{e.ChatMessage.Color.B:X2}";
+			}
+
+			uniqueUsers[username] = new UserData
+			{
+				LowercaseName = username,
+				ProperCaseName = e.ChatMessage.DisplayName,
+				Color = hexColor
+			};
+
+			Console.WriteLine($"[+] {username} ({uniqueUsers.Count} total)");
+			Console.Out.Flush();
+		}
+	}
+
+	private void Client_OnUserBanned(object sender, OnUserBannedArgs e)
+	{
+		string username = e.UserBan.Username.ToLower();
+		if (uniqueUsers.Remove(username))
+		{
+			Console.ForegroundColor = ConsoleColor.Red;
+			Console.WriteLine($"[-] {username} (banned) ({uniqueUsers.Count} remaining)");
+			Console.ResetColor();
+			Console.Out.Flush();
+		}
+	}
+
+	private void Client_OnConnectionError(object sender, OnConnectionErrorArgs e)
+	{
+		if (isReconnecting) return; // Prevent multiple simultaneous reconnect attempts
+
+		isReconnecting = true;
+		Task.Run(async () =>
+		{
+			await Task.Delay(5000);
+			client.Reconnect();
+		});
+	}
+
+	private void Client_OnDisconnected(object sender, OnDisconnectedEventArgs e)
+	{
+		if (isReconnecting) return; // Prevent multiple simultaneous reconnect attempts
+
+		isReconnecting = true;
+		Task.Run(async () =>
+		{
+			await Task.Delay(5000);
+			client.Reconnect();
+		});
+	}
+
+	private void Client_OnReconnected(object sender, OnReconnectedEventArgs e)
+	{
+		isReconnecting = false; // Reset flag on successful reconnection
+		Console.ForegroundColor = ConsoleColor.Green;
+		Console.WriteLine("✓ Reconnected successfully!");
+		Console.ResetColor();
+		Console.Out.Flush();
+	}
+
+	private void DisplayAndSaveUsers()
+	{
+		if (uniqueUsers.Count == 0)
+		{
+			Console.WriteLine("\n[No users tracked yet]\n");
 			return;
 		}
 
-		try
-		{
-			var lines = File.ReadAllLines(filePath);
-			foreach (var line in lines)
-			{
-				string trimmedLine = line.Trim();
-				if (!string.IsNullOrEmpty(trimmedLine))
-				{
-					excludedUsers.Add(trimmedLine);
-				}
-			}
-			Console.WriteLine($"Loaded {excludedUsers.Count} excluded users from {filePath}.\n");
-		}
-		catch (Exception ex)
-		{
-			Console.WriteLine($"Error reading {filePath}: {ex.Message}\n");
-		}
-	}
+		Console.WriteLine($"\n========== CHATTERS ({uniqueUsers.Count}) ==========\n");
 
-	private void DisplayChatUsers()
-	{
-		var sortedUsers = uniqueUsers.OrderBy(u => u).ToList();
+		var sortedUsers = uniqueUsers.Values.OrderBy(u => u.LowercaseName).ToList();
 
-		Console.WriteLine("\n========================================");
-		Console.WriteLine($"Stream ended. Thank you to these {sortedUsers.Count} chatters!");
-		Console.WriteLine("========================================\n");
-
+		// Display in console with proper casing
 		foreach (var user in sortedUsers)
 		{
-			Console.WriteLine($"  • {user}");
+			Console.WriteLine($"{user.LowercaseName}");
 		}
 
-		// Write to Text.txt file
-		WriteUsersToFile(sortedUsers);
-
-		Console.WriteLine("\n========================================");
-		Console.WriteLine("\nPress Enter to close...");
-		Console.ReadLine();
-	}
-
-	private void WriteUsersToFile(List<string> users)
-	{
-		string filePath = "Text.txt";
-
+		// Save to Text.html
 		try
 		{
-			// WriteAllLines overwrites existing file with new content
-			File.WriteAllLines(filePath, users);
-			Console.WriteLine($"User list saved to {filePath}");
+			var lines = sortedUsers.Select(u => $"<div style=\"color:{u.Color.TrimStart('#')}\">{u.ProperCaseName}</div>").ToList();
+			File.WriteAllLines("Text.html", lines);
+
+			Console.ForegroundColor = ConsoleColor.Green;
+			Console.WriteLine($"\n✓ Saved {uniqueUsers.Count} users to Text.html\n");
+			Console.ResetColor();
 		}
 		catch (Exception ex)
 		{
-			Console.WriteLine($"Error writing to file: {ex.Message}");
+			Console.ForegroundColor = ConsoleColor.Red;
+			Console.WriteLine($"\n✗ Error saving to Text.html: {ex.Message}\n");
+			Console.ResetColor();
 		}
 	}
+
 }
