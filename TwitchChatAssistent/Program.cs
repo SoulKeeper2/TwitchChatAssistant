@@ -291,64 +291,67 @@ public class TwitchChatAssistant
 			int scrollDurationSeconds = Math.Max(8, Math.Min(sortedUsers.Count, 60));
 
 			string htmlContent = $@"<!DOCTYPE html>
-			<html lang=""en"">
-			<head>
-				<meta charset=""UTF-8"">
-				<meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
-				<title>Chatters</title>
-				<style>
-					html, body {{
-						margin: 0;
-						padding: 0;
-						width: 100%;
-						height: 100%;
-						background-color: #1a1a1a;
-						font-family: Arial, sans-serif;
-						font-size: 24px;
-						line-height: 2;
-					}}
-					#container {{
-						text-align: center;
-						padding-top: 100vh;
-						padding-bottom: 300vh;
-					}}
-					div {{
-						padding: 12px 0;
-						word-wrap: break-word;
-					}}
-				</style>
-			</head>
-			<body>
-			<div id=""container"">
-			{string.Join("\n", userDivs)}
-			</div>
-			<script>
-				function startAutoScroll() {{
-					const scrollDuration = {scrollDurationSeconds * 1000}; // milliseconds
-					const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+		<html lang=""en"">
+		<head>
+			<meta charset=""UTF-8"">
+			<meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+			<title>Chatters</title>
+			<style>
+				html, body {{
+					margin: 0;
+					padding: 0;
+					width: 100%;
+					height: 100%;
+					background-color: #1a1a1a;
+					font-family: Arial, sans-serif;
+					font-size: 24px;
+					line-height: 2;
+				}}
+				#container {{
+					text-align: center;
+					padding-top: 100vh;
+					padding-bottom: 300vh;
+				}}
+				div {{
+					padding: 12px 0;
+					word-wrap: break-word;
+				}}
+			</style>
+		</head>
+		<body>
+		<div id=""container"">
+		{string.Join("\n", userDivs)}
+		</div>
+		<script>
+			function startAutoScroll() {{
+				const scrollDuration = {scrollDurationSeconds * 1000}; // milliseconds
+				const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+				
+				const startTime = Date.now();
+				
+				function scroll() {{
+					const elapsed = Date.now() - startTime;
+					const progress = Math.min(elapsed / scrollDuration, 1);
 					
-					const startTime = Date.now();
+					// Scroll from bottom to top
+					window.scrollTo(0, maxScroll * progress);
 					
-					function scroll() {{
-						const elapsed = Date.now() - startTime;
-						const progress = Math.min(elapsed / scrollDuration, 1);
-						
-						// Scroll from bottom to top
-						window.scrollTo(0, maxScroll * progress);
-						
-						if (progress < 1) {{
-							requestAnimationFrame(scroll);
-						}}
+					if (progress < 1) {{
+						requestAnimationFrame(scroll);
 					}}
-					
-					scroll();
 				}}
 				
-				window.addEventListener('load', startAutoScroll);
-			</script>
-			</body>
-			</html>";
+				scroll();
+			}}
 			
+			// 5-second delay before credits roll
+			window.addEventListener('load', function() {{
+				setTimeout(startAutoScroll, 5000);
+			}});
+		</script>
+		</body>
+		</html>";
+
 			File.WriteAllText("Text.html", htmlContent);
 
 			Console.ForegroundColor = ConsoleColor.Green;
