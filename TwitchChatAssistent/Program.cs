@@ -282,14 +282,77 @@ public class TwitchChatAssistant
 			Console.WriteLine($"{user.LowercaseName}");
 		}
 
-		// Save to Text.html
+		// Save to Text.html with optimized auto-scrolling (Star Wars style)
 		try
 		{
-			var lines = sortedUsers.Select(u => $"<div style=\"color:{u.Color.TrimStart('#')}\">{u.ProperCaseName}</div>").ToList();
-			File.WriteAllLines("Text.html", lines);
+			var userDivs = sortedUsers.Select(u => $"<div style=\"color:{u.Color}\">{u.ProperCaseName}</div>").ToList();
+
+			// Calculate scroll duration: 1 second per user, minimum 8 seconds, maximum 60 seconds
+			int scrollDurationSeconds = Math.Max(8, Math.Min(sortedUsers.Count, 60));
+
+			string htmlContent = $@"<!DOCTYPE html>
+			<html lang=""en"">
+			<head>
+				<meta charset=""UTF-8"">
+				<meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+				<title>Chatters</title>
+				<style>
+					html, body {{
+						margin: 0;
+						padding: 0;
+						width: 100%;
+						height: 100%;
+						background-color: #1a1a1a;
+						font-family: Arial, sans-serif;
+						font-size: 24px;
+						line-height: 2;
+					}}
+					#container {{
+						text-align: center;
+						padding-top: 100vh;
+						padding-bottom: 300vh;
+					}}
+					div {{
+						padding: 12px 0;
+						word-wrap: break-word;
+					}}
+				</style>
+			</head>
+			<body>
+			<div id=""container"">
+			{string.Join("\n", userDivs)}
+			</div>
+			<script>
+				function startAutoScroll() {{
+					const scrollDuration = {scrollDurationSeconds * 1000}; // milliseconds
+					const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+					
+					const startTime = Date.now();
+					
+					function scroll() {{
+						const elapsed = Date.now() - startTime;
+						const progress = Math.min(elapsed / scrollDuration, 1);
+						
+						// Scroll from bottom to top
+						window.scrollTo(0, maxScroll * progress);
+						
+						if (progress < 1) {{
+							requestAnimationFrame(scroll);
+						}}
+					}}
+					
+					scroll();
+				}}
+				
+				window.addEventListener('load', startAutoScroll);
+			</script>
+			</body>
+			</html>";
+			
+			File.WriteAllText("Text.html", htmlContent);
 
 			Console.ForegroundColor = ConsoleColor.Green;
-			Console.WriteLine($"\n✓ Saved {uniqueUsers.Count} users to Text.html\n");
+			Console.WriteLine($"\n✓ Saved {uniqueUsers.Count} users to Text.html (scroll duration: {scrollDurationSeconds}s)\n");
 			Console.ResetColor();
 		}
 		catch (Exception ex)
