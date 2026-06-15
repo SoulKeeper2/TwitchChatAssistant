@@ -302,7 +302,7 @@ public class TwitchChatAssistant
 					padding: 0;
 					width: 100%;
 					height: 100%;
-					background-color: #1a1a1a;
+					background-color: transparent;
 					font-family: Arial, sans-serif;
 					font-size: 24px;
 					line-height: 2;
