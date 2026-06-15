@@ -287,8 +287,8 @@ public class TwitchChatAssistant
 		{
 			var userDivs = sortedUsers.Select(u => $"<div style=\"color:{u.Color}\">{u.ProperCaseName}</div>").ToList();
 
-			// Calculate scroll duration: 1 second per user, minimum 8 seconds, maximum 60 seconds
-			int scrollDurationSeconds = Math.Max(8, Math.Min(sortedUsers.Count, 60));
+			// Calculate scroll duration: 1 second per user, minimum 15 seconds, maximum 60 seconds
+			int scrollDurationSeconds = Math.Max(15, Math.Min(sortedUsers.Count, 60));
 
 			string htmlContent = $@"<!DOCTYPE html>
 		<html lang=""en"">
